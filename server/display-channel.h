@@ -186,6 +186,7 @@ struct DisplayChannel {
     uint32_t glz_drawable_count;
 
     int stream_video;
+    GArray *video_codecs;
     uint32_t stream_count;
     Stream streams_buf[NUM_STREAMS];
     Stream *free_streams;
@@ -247,6 +248,7 @@ DisplayChannel*            display_channel_new                       (SpiceServe
                                                                       RedWorker *worker,
                                                                       int migrate,
                                                                       int stream_video,
+                                                                      GArray *video_codecs,
                                                                       uint32_t n_surfaces);
 void                       display_channel_create_surface            (DisplayChannel *display, uint32_t surface_id,
                                                                       uint32_t width, uint32_t height,
@@ -268,6 +270,8 @@ void                       display_channel_update                    (DisplayCha
 void                       display_channel_free_some                 (DisplayChannel *display);
 void                       display_channel_set_stream_video          (DisplayChannel *display,
                                                                       int stream_video);
+void                       display_channel_set_video_codecs          (DisplayChannel *display,
+                                                                      GArray *video_codecs);
 int                        display_channel_get_streams_timeout       (DisplayChannel *display);
 void                       display_channel_compress_stats_print      (const DisplayChannel *display);
 void                       display_channel_compress_stats_reset      (DisplayChannel *display);
