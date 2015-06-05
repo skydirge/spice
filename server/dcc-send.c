@@ -1656,12 +1656,12 @@ static void red_release_video_encoder_buffer(uint8_t *data, void *opaque)
 }
 
 static int red_marshall_stream_data(RedChannelClient *rcc,
-                                    SpiceMarshaller *base_marshaller, Drawable *drawable)
+                                    SpiceMarshaller *base_marshaller,
+                                    Drawable *drawable)
 {
     DisplayChannelClient *dcc = RCC_TO_DCC(rcc);
     DisplayChannel *display = DCC_TO_DC(dcc);
     Stream *stream = drawable->stream;
-    SpiceImage *image;
     uint32_t frame_mm_time;
     int width, height;
     int ret;
@@ -1670,10 +1670,10 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
         spice_assert(drawable->sized_stream);
         stream = drawable->sized_stream;
     }
-    spice_assert(drawable->red_drawable->type == QXL_DRAW_COPY);
+    RedDrawable *red_drawable = drawable->red_drawable;
+    spice_assert(red_drawable->type == QXL_DRAW_COPY);
 
-    image = drawable->red_drawable->u.copy.src_bitmap;
-
+    SpiceImage *image = red_drawable->u.copy.src_bitmap;
     if (image->descriptor.type != SPICE_IMAGE_TYPE_BITMAP) {
         return FALSE;
     }
@@ -1715,7 +1715,8 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
                                              frame_mm_time,
                                              &image->u.bitmap, width, height,
                                              &drawable->red_drawable->u.copy.src_area,
-                                             stream->top_down, &outbuf);
+                                             stream->top_down, red_drawable,
+                                             &outbuf);
     switch (ret) {
     case VIDEO_ENCODER_FRAME_DROP:
         spice_assert(dcc->use_video_encoder_rate_control);
