@@ -1707,18 +1707,6 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
     }
 
     StreamAgent *agent = &dcc->priv->stream_agents[get_stream_id(display, stream)];
-    uint64_t time_now = spice_get_monotonic_time_ns();
-
-    if (!dcc->priv->use_video_encoder_rate_control) {
-        if (time_now - agent->last_send_time < (1000 * 1000 * 1000) / agent->fps) {
-            agent->frames--;
-#ifdef STREAM_STATS
-            agent->stats.num_drops_fps++;
-#endif
-            return TRUE;
-        }
-    }
-
     VideoBuffer *outbuf;
     /* workaround for vga streams */
     frame_mm_time =  drawable->red_drawable->mm_time ?
@@ -1733,7 +1721,6 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
                                              &outbuf);
     switch (ret) {
     case VIDEO_ENCODER_FRAME_DROP:
-        spice_assert(dcc->priv->use_video_encoder_rate_control);
 #ifdef STREAM_STATS
         agent->stats.num_drops_fps++;
 #endif
@@ -1775,7 +1762,6 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
     }
     spice_marshaller_add_ref_full(base_marshaller, outbuf->data, outbuf->size,
                                   &red_release_video_encoder_buffer, outbuf);
-    agent->last_send_time = time_now;
 #ifdef STREAM_STATS
     agent->stats.num_frames_sent++;
     agent->stats.size_sent += outbuf->size;
@@ -2160,7 +2146,6 @@ static void marshall_stream_start(RedChannelClient *rcc,
     DisplayChannelClient *dcc = DISPLAY_CHANNEL_CLIENT(rcc);
     Stream *stream = agent->stream;
 
-    agent->last_send_time = 0;
     spice_assert(stream);
     if (!agent->video_encoder) {
         /* Without a video encoder nothing will be streamed */
