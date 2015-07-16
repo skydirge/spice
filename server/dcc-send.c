@@ -1649,6 +1649,12 @@ static void red_lossy_marshall_qxl_draw_text(RedChannelClient *rcc,
     }
 }
 
+static void red_release_video_encoder_buffer(uint8_t *data, void *opaque)
+{
+    VideoBuffer *buffer = (VideoBuffer*)opaque;
+    buffer->free(buffer);
+}
+
 static int red_marshall_stream_data(RedChannelClient *rcc,
                                     SpiceMarshaller *base_marshaller, Drawable *drawable)
 {
@@ -1657,7 +1663,6 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
     Stream *stream = drawable->stream;
     SpiceImage *image;
     uint32_t frame_mm_time;
-    int n;
     int width, height;
     int ret;
 
@@ -1689,7 +1694,6 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
 
     StreamAgent *agent = &dcc->stream_agents[get_stream_id(display, stream)];
     uint64_t time_now = spice_get_monotonic_time_ns();
-    size_t outbuf_size;
 
     if (!dcc->use_video_encoder_rate_control) {
         if (time_now - agent->last_send_time < (1000 * 1000 * 1000) / agent->fps) {
@@ -1701,19 +1705,17 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
         }
     }
 
+    VideoBuffer *outbuf;
     /* workaround for vga streams */
     frame_mm_time =  drawable->red_drawable->mm_time ?
                         drawable->red_drawable->mm_time :
                         reds_get_mm_time();
-    outbuf_size = dcc->send_data.stream_outbuf_size;
     ret = !agent->video_encoder ? VIDEO_ENCODER_FRAME_UNSUPPORTED :
           agent->video_encoder->encode_frame(agent->video_encoder,
                                              frame_mm_time,
                                              &image->u.bitmap, width, height,
                                              &drawable->red_drawable->u.copy.src_area,
-                                             stream->top_down,
-                                             &dcc->send_data.stream_outbuf,
-                                             &outbuf_size, &n);
+                                             stream->top_down, &outbuf);
     switch (ret) {
     case VIDEO_ENCODER_FRAME_DROP:
         spice_assert(dcc->use_video_encoder_rate_control);
@@ -1729,7 +1731,6 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
         spice_error("bad return value (%d) from VideoEncoder::encode_frame", ret);
         return FALSE;
     }
-    dcc->send_data.stream_outbuf_size = outbuf_size;
 
     if (!drawable->sized_stream) {
         SpiceMsgDisplayStreamData stream_data;
@@ -1738,7 +1739,7 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
 
         stream_data.base.id = get_stream_id(display, stream);
         stream_data.base.multi_media_time = frame_mm_time;
-        stream_data.data_size = n;
+        stream_data.data_size = outbuf->size;
 
         spice_marshall_msg_display_stream_data(base_marshaller, &stream_data);
     } else {
@@ -1748,7 +1749,7 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
 
         stream_data.base.id = get_stream_id(display, stream);
         stream_data.base.multi_media_time = frame_mm_time;
-        stream_data.data_size = n;
+        stream_data.data_size = outbuf->size;
         stream_data.width = width;
         stream_data.height = height;
         stream_data.dest = drawable->red_drawable->bbox;
@@ -1757,12 +1758,12 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
         rect_debug(&stream_data.dest);
         spice_marshall_msg_display_stream_data_sized(base_marshaller, &stream_data);
     }
-    spice_marshaller_add_ref(base_marshaller,
-                             dcc->send_data.stream_outbuf, n);
+    spice_marshaller_add_ref_full(base_marshaller, outbuf->data, outbuf->size,
+                                  &red_release_video_encoder_buffer, outbuf);
     agent->last_send_time = time_now;
 #ifdef STREAM_STATS
     agent->stats.num_frames_sent++;
-    agent->stats.size_sent += n;
+    agent->stats.size_sent += outbuf->size;
     agent->stats.end = frame_mm_time;
 #endif
 
