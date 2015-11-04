@@ -1706,7 +1706,8 @@ static int red_marshall_stream_data(RedChannelClient *rcc,
                         drawable->red_drawable->mm_time :
                         reds_get_mm_time();
     outbuf_size = dcc->send_data.stream_outbuf_size;
-    ret = agent->video_encoder->encode_frame(agent->video_encoder,
+    ret = !agent->video_encoder ? VIDEO_ENCODER_FRAME_UNSUPPORTED :
+          agent->video_encoder->encode_frame(agent->video_encoder,
                                              frame_mm_time,
                                              &image->u.bitmap, width, height,
                                              &drawable->red_drawable->u.copy.src_area,
