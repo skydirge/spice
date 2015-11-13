@@ -3456,7 +3456,7 @@ err:
 }
 
 static const char default_renderer[] = "sw";
-static const char default_video_codecs[] = "spice:mjpeg;gstreamer:mjpeg";
+static const char default_video_codecs[] = "spice:mjpeg;gstreamer:mjpeg;gstreamer:vp8";
 
 /* new interface */
 SPICE_GNUC_VISIBLE SpiceServer *spice_server_new(void)
@@ -3541,11 +3541,13 @@ static new_video_encoder_t video_encoder_procs[] = {
 
 static const EnumNames video_codec_names[] = {
     {SPICE_VIDEO_CODEC_TYPE_MJPEG, "mjpeg"},
+    {SPICE_VIDEO_CODEC_TYPE_VP8, "vp8"},
     {0, NULL},
 };
 
 static int video_codec_caps[] = {
     SPICE_DISPLAY_CAP_CODEC_MJPEG,
+    SPICE_DISPLAY_CAP_CODEC_VP8,
 };
 
 
