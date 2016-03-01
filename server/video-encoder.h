@@ -156,5 +156,9 @@ typedef struct VideoEncoderRateControlCbs {
  */
 VideoEncoder* mjpeg_encoder_new(uint64_t starting_bit_rate,
                                 VideoEncoderRateControlCbs *cbs);
+#ifdef HAVE_GSTREAMER_1_0
+VideoEncoder* gstreamer_encoder_new(uint64_t starting_bit_rate,
+                                    VideoEncoderRateControlCbs *cbs);
+#endif
 
 #endif
