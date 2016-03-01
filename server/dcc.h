@@ -184,7 +184,7 @@ void                       dcc_destroy_surface                       (DisplayCha
                                                                       uint32_t surface_id);
 void                       dcc_stream_agent_clip                     (DisplayChannelClient* dcc,
                                                                       StreamAgent *agent);
-void                       dcc_create_stream                         (DisplayChannelClient *dcc,
+gboolean                   dcc_create_stream                         (DisplayChannelClient *dcc,
                                                                       Stream *stream);
 void                       dcc_create_surface                        (DisplayChannelClient *dcc,
                                                                       int surface_id);

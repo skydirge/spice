@@ -440,7 +440,12 @@ static void display_channel_create_stream(DisplayChannel *display, Drawable *dra
     display->streams_size_total += stream->width * stream->height;
     display->stream_count++;
     FOREACH_DCC(display, dcc_ring_item, next, dcc) {
-        dcc_create_stream(dcc, stream);
+        if (!dcc_create_stream(dcc, stream)) {
+            drawable->stream = NULL;
+            stream->current = NULL;
+            stream_stop(display, stream);
+            return;
+        }
     }
     spice_debug("stream %d %dx%d (%d, %d) (%d, %d) %u fps",
                 (int)(stream - display->streams_buf), stream->width,
@@ -698,24 +703,31 @@ static void update_client_playback_delay(void *opaque, uint32_t delay_ms)
 }
 
 /* A helper for dcc_create_stream(). */
-static VideoEncoder* dcc_create_video_encoder(uint64_t starting_bit_rate,
+static VideoEncoder* dcc_create_video_encoder(DisplayChannelClient *dcc,
+                                              uint64_t starting_bit_rate,
                                               VideoEncoderRateControlCbs *cbs)
 {
+    RedChannelClient *rcc = RED_CHANNEL_CLIENT(dcc);
+    int client_has_multi_codec = red_channel_client_test_remote_cap(rcc, SPICE_DISPLAY_CAP_MULTI_CODEC);
+    if (!client_has_multi_codec || red_channel_client_test_remote_cap(rcc, SPICE_DISPLAY_CAP_CODEC_MJPEG)) {
 #ifdef HAVE_GSTREAMER_1_0
-    VideoEncoder* video_encoder = gstreamer_encoder_new(starting_bit_rate, cbs);
-    if (video_encoder) {
-        return video_encoder;
-    }
+        VideoEncoder* video_encoder = gstreamer_encoder_new(starting_bit_rate, cbs);
+        if (video_encoder) {
+            return video_encoder;
+        }
 #endif
-    /* Use the builtin MJPEG video encoder as a fallback */
-    return mjpeg_encoder_new(starting_bit_rate, cbs);
+        /* Use the builtin MJPEG video encoder as a fallback */
+        return mjpeg_encoder_new(starting_bit_rate, cbs);
+    }
+
+    return NULL;
 }
 
-void dcc_create_stream(DisplayChannelClient *dcc, Stream *stream)
+gboolean dcc_create_stream(DisplayChannelClient *dcc, Stream *stream)
 {
     StreamAgent *agent = &dcc->stream_agents[get_stream_id(DCC_TO_DC(dcc), stream)];
 
-    spice_return_if_fail(region_is_empty(&agent->vis_region));
+    spice_return_val_if_fail(region_is_empty(&agent->vis_region), FALSE);
 
     stream->refs++;
     if (stream->current) {
@@ -739,9 +751,13 @@ void dcc_create_stream(DisplayChannelClient *dcc, Stream *stream)
         video_cbs.update_client_playback_delay = update_client_playback_delay;
 
         initial_bit_rate = get_initial_bit_rate(dcc, stream);
-        agent->video_encoder = dcc_create_video_encoder(initial_bit_rate, &video_cbs);
+        agent->video_encoder = dcc_create_video_encoder(dcc, initial_bit_rate, &video_cbs);
     } else {
-        agent->video_encoder = dcc_create_video_encoder(0, NULL);
+        agent->video_encoder = dcc_create_video_encoder(dcc, 0, NULL);
+    }
+    if (agent->video_encoder == NULL) {
+        stream->refs--;
+        return FALSE;
     }
     red_channel_client_pipe_add(RED_CHANNEL_CLIENT(dcc), &agent->create_item);
 
@@ -760,6 +776,7 @@ void dcc_create_stream(DisplayChannelClient *dcc, Stream *stream)
         agent->stats.start = stream->current->red_drawable->mm_time;
     }
 #endif
+    return TRUE;
 }
 
 void stream_agent_stop(StreamAgent *agent)

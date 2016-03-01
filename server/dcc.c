@@ -408,7 +408,10 @@ static void dcc_create_all_streams(DisplayChannelClient *dcc)
 
     while ((item = ring_next(ring, item))) {
         Stream *stream = SPICE_CONTAINEROF(item, Stream, link);
-        dcc_create_stream(dcc, stream);
+        if (!dcc_create_stream(dcc, stream)) {
+            stream_stop(DCC_TO_DC(dcc), stream);
+            return;
+        }
     }
 }
 
