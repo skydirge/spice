@@ -350,7 +350,7 @@ static void dcc_init_stream_agents(DisplayChannelClient *dcc)
         red_channel_pipe_item_init(channel, &agent->create_item, PIPE_ITEM_TYPE_STREAM_CREATE);
         red_channel_pipe_item_init(channel, &agent->destroy_item, PIPE_ITEM_TYPE_STREAM_DESTROY);
     }
-    dcc->use_mjpeg_encoder_rate_control =
+    dcc->use_video_encoder_rate_control =
         red_channel_client_test_remote_cap(RED_CHANNEL_CLIENT(dcc), SPICE_DISPLAY_CAP_STREAM_REPORT);
 }
 
@@ -486,9 +486,9 @@ static void dcc_destroy_stream_agents(DisplayChannelClient *dcc)
         StreamAgent *agent = &dcc->stream_agents[i];
         region_destroy(&agent->vis_region);
         region_destroy(&agent->clip);
-        if (agent->mjpeg_encoder) {
-            mjpeg_encoder_destroy(agent->mjpeg_encoder);
-            agent->mjpeg_encoder = NULL;
+        if (agent->video_encoder) {
+            agent->video_encoder->destroy(agent->video_encoder);
+            agent->video_encoder = NULL;
         }
     }
 }
@@ -1397,19 +1397,19 @@ static int dcc_handle_stream_report(DisplayChannelClient *dcc,
     }
 
     agent = &dcc->stream_agents[report->stream_id];
-    if (!agent->mjpeg_encoder) {
+    if (!agent->video_encoder) {
         return TRUE;
     }
 
     spice_return_val_if_fail(report->unique_id == agent->report_id, TRUE);
 
-    mjpeg_encoder_client_stream_report(agent->mjpeg_encoder,
-                                       report->num_frames,
-                                       report->num_drops,
-                                       report->start_frame_mm_time,
-                                       report->end_frame_mm_time,
-                                       report->last_frame_delay,
-                                       report->audio_delay);
+    agent->video_encoder->client_stream_report(agent->video_encoder,
+                                               report->num_frames,
+                                               report->num_drops,
+                                               report->start_frame_mm_time,
+                                               report->end_frame_mm_time,
+                                               report->last_frame_delay,
+                                               report->audio_delay);
     return TRUE;
 }
 
