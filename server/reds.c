@@ -3427,7 +3427,7 @@ err:
 static const char default_renderer[] = "sw";
 
 #define RED_MAX_VIDEO_CODECS 8
-static const char default_video_codecs[] = "spice:mjpeg;gstreamer:mjpeg";
+static const char default_video_codecs[] = "spice:mjpeg;gstreamer:mjpeg;gstreamer:vp8";
 
 /* new interface */
 SPICE_GNUC_VISIBLE SpiceServer *spice_server_new(void)
