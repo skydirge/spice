@@ -702,6 +702,20 @@ static void update_client_playback_delay(void *opaque, uint32_t delay_ms)
                                         agent->dcc->streams_max_latency);
 }
 
+void bitmap_ref(gpointer data)
+{
+    RedDrawable *red_drawable = (RedDrawable*)data;
+    spice_debug("red_drawable %p", red_drawable);
+    red_drawable_ref(red_drawable);
+}
+
+void bitmap_unref(gpointer data)
+{
+    RedDrawable *red_drawable = (RedDrawable*)data;
+    spice_debug("red_drawable %p", red_drawable);
+    red_drawable_unref(red_drawable);
+}
+
 /* A helper for dcc_create_stream(). */
 static VideoEncoder* dcc_create_video_encoder(DisplayChannelClient *dcc,
                                               uint64_t starting_bit_rate,
@@ -726,7 +740,7 @@ static VideoEncoder* dcc_create_video_encoder(DisplayChannelClient *dcc,
             continue;
         }
 
-        VideoEncoder* video_encoder = video_codec->create(video_codec->type, starting_bit_rate, cbs);
+        VideoEncoder* video_encoder = video_codec->create(video_codec->type, starting_bit_rate, cbs, bitmap_ref, bitmap_unref);
         if (video_encoder) {
             return video_encoder;
         }
@@ -734,7 +748,7 @@ static VideoEncoder* dcc_create_video_encoder(DisplayChannelClient *dcc,
 
     /* Try to use the builtin MJPEG video encoder as a fallback */
     if (!client_has_multi_codec || red_channel_client_test_remote_cap(rcc, SPICE_DISPLAY_CAP_CODEC_MJPEG)) {
-        return mjpeg_encoder_new(SPICE_VIDEO_CODEC_TYPE_MJPEG, starting_bit_rate, cbs);
+        return mjpeg_encoder_new(SPICE_VIDEO_CODEC_TYPE_MJPEG, starting_bit_rate, cbs, bitmap_ref, bitmap_unref);
     }
 
     return NULL;
