@@ -24,7 +24,7 @@
 #include "memslot.h"
 
 typedef struct RedDrawable {
-    int refs;
+    gint refs;
     QXLInstance *qxl;
     QXLReleaseInfoExt release_info_ext;
     uint32_t surface_id;
@@ -60,7 +60,7 @@ typedef struct RedDrawable {
 
 static inline RedDrawable *red_drawable_ref(RedDrawable *drawable)
 {
-    drawable->refs++;
+    g_atomic_int_inc(&drawable->refs);
     return drawable;
 }
 

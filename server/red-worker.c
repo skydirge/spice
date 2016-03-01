@@ -124,9 +124,14 @@ static void common_release_recv_buf(RedChannelClient *rcc, uint16_t type, uint32
 
 void red_drawable_unref(RedDrawable *red_drawable)
 {
-    if (--red_drawable->refs) {
+    gint old_refs;
+    do {
+        old_refs = red_drawable->refs;
+    } while (!g_atomic_int_compare_and_exchange(&red_drawable->refs, old_refs, old_refs - 1));
+    if (old_refs > 1) {
         return;
     }
+
     red_drawable->qxl->st->qif->release_resource(red_drawable->qxl,
                                                  red_drawable->release_info_ext);
     red_put_drawable(red_drawable);
