@@ -1074,6 +1074,14 @@ static void handle_dev_set_streaming_video(void *opaque, void *payload)
     display_channel_set_stream_video(worker->display_channel, msg->streaming_video);
 }
 
+void handle_dev_set_video_codecs(void *opaque, void *payload)
+{
+    RedWorkerMessageSetVideoCodecs *msg = payload;
+    RedWorker *worker = opaque;
+
+    display_channel_set_video_codecs(worker->display_channel, msg->video_codecs);
+}
+
 static void handle_dev_set_mouse_mode(void *opaque, void *payload)
 {
     RedWorkerMessageSetMouseMode *msg = payload;
@@ -1347,6 +1355,11 @@ static void register_callbacks(Dispatcher *dispatcher)
                                 sizeof(RedWorkerMessageSetStreamingVideo),
                                 DISPATCHER_NONE);
     dispatcher_register_handler(dispatcher,
+                                RED_WORKER_MESSAGE_SET_VIDEO_CODECS,
+                                handle_dev_set_video_codecs,
+                                sizeof(RedWorkerMessageSetVideoCodecs),
+                                DISPATCHER_ACK);
+    dispatcher_register_handler(dispatcher,
                                 RED_WORKER_MESSAGE_SET_MOUSE_MODE,
                                 handle_dev_set_mouse_mode,
                                 sizeof(RedWorkerMessageSetMouseMode),
@@ -1533,6 +1546,7 @@ RedWorker* red_worker_new(QXLInstance *qxl, RedDispatcher *red_dispatcher)
     worker->cursor_channel = cursor_channel_new(worker);
     // TODO: handle seemless migration. Temp, setting migrate to FALSE
     worker->display_channel = display_channel_new(worker, FALSE, reds_get_streaming_video(reds),
+                                                  reds_get_video_codecs(reds),
                                                   init_info.n_surfaces);
 
     return worker;

@@ -230,6 +230,7 @@ struct RedsState {
 
     gboolean ticketing_enabled;
     uint32_t streaming_video;
+    GArray* video_codecs;
     SpiceImageCompression image_compression;
     spice_wan_compression_t jpeg_state;
     spice_wan_compression_t zlib_glz_state;

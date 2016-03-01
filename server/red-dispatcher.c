@@ -1022,6 +1022,16 @@ void red_dispatcher_on_sv_change(RedDispatcher *dispatcher, int sv)
                             &payload);
 }
 
+void red_dispatcher_on_vc_change(RedDispatcher *dispatcher, GArray *video_codecs)
+{
+    /* this command is synchronous, so it's ok to pass a pointer */
+    RedWorkerMessageSetVideoCodecs payload;
+    payload.video_codecs = video_codecs;
+    dispatcher_send_message(&dispatcher->dispatcher,
+                            RED_WORKER_MESSAGE_SET_VIDEO_CODECS,
+                            &payload);
+}
+
 void red_dispatcher_set_mouse_mode(RedDispatcher *dispatcher, uint32_t mode)
 {
     RedWorkerMessageSetMouseMode payload;
