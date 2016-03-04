@@ -189,6 +189,25 @@ static void set_appsrc_caps(SpiceGstEncoder *encoder)
     gst_app_src_set_caps(encoder->appsrc, encoder->src_caps);
 }
 
+static int physical_core_count = 0;
+static int get_physical_core_count(void)
+{
+    if (!physical_core_count) {
+#ifdef HAVE_G_GET_NUMPROCESSORS
+        physical_core_count = g_get_num_processors();
+#endif
+        if (system("egrep -l '^flags\\b.*: .*\\bht\\b' /proc/cpuinfo >/dev/null 2>&1") == 0) {
+            /* Hyperthreading is enabled so divide by two to get the number
+             * of physical cores.
+             */
+            physical_core_count = physical_core_count / 2;
+        }
+        if (physical_core_count == 0)
+            physical_core_count = 1;
+    }
+    return physical_core_count;
+}
+
 /* A helper for spice_gst_encoder_encode_frame() */
 static gboolean create_pipeline(SpiceGstEncoder *encoder)
 {
@@ -214,8 +233,14 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
          *   CPU usage.
          * - deadline is supposed to be set in microseconds but in practice
          *   it behaves like a boolean.
+         * - At least up to GStreamer 1.6.2, vp8enc cannot be trusted to pick
+         *   the optimal number of threads. Also exceeding the number of
+         *   physical core really degrades image quality.
+         * - token-partitions parallelizes more operations.
          */
-        gstenc = g_strdup_printf("vp8enc end-usage=cbr min-quantizer=10 error-resilient=default lag-in-frames=0 deadline=1 cpu-used=4");
+        int threads = get_physical_core_count();
+        int parts = threads < 2 ? 0 : threads < 4 ? 1 : threads < 8 ? 2 : 3;
+        gstenc = g_strdup_printf("vp8enc end-usage=cbr min-quantizer=10 error-resilient=default lag-in-frames=0 deadline=1 cpu-used=4 threads=%d token-partitions=%d", threads, parts);
         break;
         }
     default:
