@@ -71,6 +71,7 @@
 #include "utils.h"
 
 #include "reds-private.h"
+#include "video-encoder.h"
 
 static SpiceCoreInterface *core_public = NULL;
 
@@ -176,6 +177,7 @@ static void reds_char_device_remove_state(RedsState *reds, SpiceCharDeviceState 
 static void reds_send_mm_time(RedsState *reds);
 static void reds_on_ic_change(RedsState *reds);
 static void reds_on_sv_change(RedsState *reds);
+static void reds_on_vc_change(RedsState *reds);
 static void reds_on_vm_stop(RedsState *reds);
 static void reds_on_vm_start(RedsState *reds);
 static void reds_set_mouse_mode(RedsState *reds, uint32_t mode);
@@ -3422,6 +3424,7 @@ err:
 }
 
 static const char default_renderer[] = "sw";
+static const char default_video_codecs[] = "spice:mjpeg;gstreamer:mjpeg";
 
 /* new interface */
 SPICE_GNUC_VISIBLE SpiceServer *spice_server_new(void)
@@ -3442,6 +3445,7 @@ SPICE_GNUC_VISIBLE SpiceServer *spice_server_new(void)
     memset(reds->spice_uuid, 0, sizeof(reds->spice_uuid));
     reds->ticketing_enabled = TRUE; /* ticketing enabled by default */
     reds->streaming_video = SPICE_STREAM_VIDEO_FILTER;
+    reds->video_codecs = g_array_new(FALSE, FALSE, sizeof(RedVideoCodec));
     reds->image_compression = SPICE_IMAGE_COMPRESSION_AUTO_GLZ;
     reds->jpeg_state = SPICE_WAN_COMPRESSION_AUTO;
     reds->zlib_glz_state = SPICE_WAN_COMPRESSION_AUTO;
@@ -3452,37 +3456,129 @@ SPICE_GNUC_VISIBLE SpiceServer *spice_server_new(void)
     return reds;
 }
 
-typedef struct RendererInfo {
-    int id;
+typedef struct {
+    uint32_t id;
     const char *name;
-} RendererInfo;
+} EnumNames;
 
-static const RendererInfo renderers_info[] = {
+static gboolean get_name_index(const EnumNames names[], const char *name, uint32_t *index)
+{
+    if (name) {
+        int i;
+        for (i = 0; names[i].name; i++) {
+            if (strcmp(name, names[i].name) == 0) {
+                *index = i;
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+static const EnumNames renderer_names[] = {
     {RED_RENDERER_SW, "sw"},
     {RED_RENDERER_INVALID, NULL},
 };
 
-static const RendererInfo *find_renderer(const char *name)
+static gboolean reds_add_renderer(RedsState *reds, const char *name)
 {
-    const RendererInfo *inf = renderers_info;
-    while (inf->name) {
-        if (strcmp(name, inf->name) == 0) {
-            return inf;
-        }
-        inf++;
-    }
-    return NULL;
-}
+    uint32_t index;
 
-static int reds_add_renderer(RedsState *reds, const char *name)
-{
-    const RendererInfo *inf;
-
-    if (reds->renderers->len == RED_RENDERER_LAST || !(inf = find_renderer(name))) {
+    if (reds->renderers->len == RED_RENDERER_LAST ||
+        !get_name_index(renderer_names, name, &index)) {
         return FALSE;
     }
-    g_array_append_val(reds->renderers, inf->id);
+    g_array_append_val(reds->renderers, renderer_names[index].id);
     return TRUE;
+}
+
+static const EnumNames video_encoder_names[] = {
+    {0, "spice"},
+    {1, "gstreamer"},
+    {0, NULL},
+};
+
+static new_video_encoder_t video_encoder_procs[] = {
+    &mjpeg_encoder_new,
+#ifdef HAVE_GSTREAMER_1_0
+    &gstreamer_encoder_new,
+#else
+    NULL,
+#endif
+};
+
+static const EnumNames video_codec_names[] = {
+    {SPICE_VIDEO_CODEC_TYPE_MJPEG, "mjpeg"},
+    {0, NULL},
+};
+
+static int video_codec_caps[] = {
+    SPICE_DISPLAY_CAP_CODEC_MJPEG,
+};
+
+
+/* Expected string:  encoder:codec;encoder:codec */
+static const char* parse_video_codecs(const char *codecs, char **encoder,
+                                      char **codec)
+{
+    if (!codecs) {
+        return NULL;
+    }
+    while (*codecs == ';') {
+        codecs++;
+    }
+    if (!*codecs) {
+        return NULL;
+    }
+    int n;
+    *encoder = *codec = NULL;
+    if (sscanf(codecs, "%m[0-9a-zA-Z_]:%m[0-9a-zA-Z_]%n", encoder, codec, &n) != 2) {
+        while (*codecs != '\0' && *codecs != ';') {
+            codecs++;
+        }
+        return codecs;
+    }
+    return codecs + n;
+}
+
+static void reds_set_video_codecs(RedsState *reds, const char *codecs)
+{
+    char *encoder_name, *codec_name;
+
+    if (strcmp(codecs, "auto") == 0) {
+        codecs = default_video_codecs;
+    }
+
+    /* The video_codecs array is immutable */
+    g_array_unref(reds->video_codecs);
+    reds->video_codecs = g_array_new(FALSE, FALSE, sizeof(RedVideoCodec));
+    const char *c = codecs;
+    while ( (c = parse_video_codecs(c, &encoder_name, &codec_name)) ) {
+        uint32_t encoder_index, codec_index;
+        if (!encoder_name || !codec_name) {
+            spice_warning("spice: invalid encoder:codec value at %s", codecs);
+
+        } else if (!get_name_index(video_encoder_names, encoder_name, &encoder_index)){
+            spice_warning("spice: unknown video encoder %s", encoder_name);
+
+        } else if (!get_name_index(video_codec_names, codec_name, &codec_index)) {
+            spice_warning("spice: unknown video codec %s", codec_name);
+
+        } else if (!video_encoder_procs[encoder_index]) {
+            spice_warning("spice: unsupported video encoder %s", encoder_name);
+
+        } else {
+            RedVideoCodec new_codec;
+            new_codec.create = video_encoder_procs[encoder_index];
+            new_codec.type = video_codec_names[codec_index].id;
+            new_codec.cap = video_codec_caps[codec_index];
+            g_array_append_val(reds->video_codecs, new_codec);
+        }
+
+        free(encoder_name);
+        free(codec_name);
+        codecs = c;
+    }
 }
 
 SPICE_GNUC_VISIBLE int spice_server_init(SpiceServer *reds, SpiceCoreInterface *core)
@@ -3493,12 +3589,16 @@ SPICE_GNUC_VISIBLE int spice_server_init(SpiceServer *reds, SpiceCoreInterface *
     if (reds->renderers->len == 0) {
         reds_add_renderer(reds, default_renderer);
     }
+    if (reds->video_codecs->len == 0) {
+        reds_set_video_codecs(reds, default_video_codecs);
+    }
     return ret;
 }
 
 SPICE_GNUC_VISIBLE void spice_server_destroy(SpiceServer *reds)
 {
     g_array_unref(reds->renderers);
+    g_array_unref(reds->video_codecs);
     if (reds->main_channel) {
         main_channel_close(reds->main_channel);
     }
@@ -3797,6 +3897,18 @@ SPICE_GNUC_VISIBLE int spice_server_set_streaming_video(SpiceServer *reds, int v
 uint32_t reds_get_streaming_video(const RedsState *reds)
 {
     return reds->streaming_video;
+}
+
+SPICE_GNUC_VISIBLE int spice_server_set_video_codecs(SpiceServer *reds, const char *video_codecs)
+{
+    reds_set_video_codecs(reds, video_codecs);
+    reds_on_vc_change(reds);
+    return 0;
+}
+
+GArray* reds_get_video_codecs(const RedsState *reds)
+{
+    return reds->video_codecs;
 }
 
 SPICE_GNUC_VISIBLE int spice_server_set_playback_compression(SpiceServer *reds, int enable)
@@ -4183,6 +4295,15 @@ void reds_on_sv_change(RedsState *reds)
         QXLInstance *qxl = l->data;
         red_qxl_set_compression_level(qxl, compression_level);
         red_qxl_on_sv_change(qxl, reds_get_streaming_video(reds));
+    }
+}
+
+void reds_on_vc_change(RedsState *reds)
+{
+    GList *l;
+
+    for (l = reds->qxl_instances; l != NULL; l = l->next) {
+        red_qxl_on_vc_change(l->data, reds_get_video_codecs(reds));
     }
 }
 
