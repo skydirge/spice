@@ -20,6 +20,8 @@
 #include <config.h>
 #endif
 
+#include <inttypes.h>
+
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
@@ -867,6 +869,59 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
     return TRUE;
 }
 
+/* A helper for configure_pipeline() */
+static void set_gstenc_bitrate(SpiceGstEncoder *encoder)
+{
+    GObjectClass *class = G_OBJECT_GET_CLASS(encoder->gstenc);
+    GParamSpec *param = g_object_class_find_property(class, "bitrate");
+    if (param == NULL) {
+        param = g_object_class_find_property(class, "target-bitrate");
+    }
+    if (param) {
+        uint64_t gst_bit_rate = encoder->video_bit_rate;
+        if (strstr(g_param_spec_get_blurb(param), "kbit")) {
+            gst_bit_rate = gst_bit_rate / 1024;
+        }
+
+        GObject * gobject = G_OBJECT(encoder->gstenc);
+        const gchar *prop = g_param_spec_get_name(param);
+        switch (param->value_type) {
+        case G_TYPE_INT: {
+            GParamSpecInt *range = G_PARAM_SPEC_INT(param);
+            gst_bit_rate = MAX(range->minimum, MIN(range->maximum, gst_bit_rate));
+            g_object_set(gobject, prop, (gint)gst_bit_rate, NULL);
+            break;
+        }
+        case G_TYPE_UINT: {
+            GParamSpecUInt *range = G_PARAM_SPEC_UINT(param);
+            gst_bit_rate = MAX(range->minimum, MIN(range->maximum, gst_bit_rate));
+            g_object_set(gobject, prop, (guint)gst_bit_rate, NULL);
+            break;
+        }
+        case G_TYPE_INT64: {
+            GParamSpecInt64 *range = G_PARAM_SPEC_INT64(param);
+            gst_bit_rate = MAX(range->minimum, MIN(range->maximum, gst_bit_rate));
+            g_object_set(gobject, prop, (gint64)gst_bit_rate, NULL);
+            break;
+        }
+        case G_TYPE_UINT64: {
+            GParamSpecUInt64 *range = G_PARAM_SPEC_UINT64(param);
+            gst_bit_rate = MAX(range->minimum, MIN(range->maximum, gst_bit_rate));
+            g_object_set(gobject, prop, (guint64)gst_bit_rate, NULL);
+            break;
+        }
+        default:
+            spice_warning("the %s property has an unsupported type %zu",
+                          prop, param->value_type);
+            return;
+        }
+        spice_debug("setting the GStreamer %s to %"PRIu64, prop, gst_bit_rate);
+    } else {
+        spice_printerr("Could not find the bit rate property for %s",
+                       get_gst_codec_name(encoder));
+    }
+}
+
 /* A helper for spice_gst_encoder_encode_frame() */
 static gboolean configure_pipeline(SpiceGstEncoder *encoder,
                                    const SpiceBitmap *bitmap)
@@ -876,30 +931,11 @@ static gboolean configure_pipeline(SpiceGstEncoder *encoder,
     }
 
     /* Configure the encoder bitrate */
-    switch (encoder->base.codec_type) {
-    case SPICE_VIDEO_CODEC_TYPE_MJPEG:
-        g_object_set(G_OBJECT(encoder->gstenc),
-                     "bitrate", (gint)encoder->video_bit_rate,
-                     NULL);
+    set_gstenc_bitrate(encoder);
+    if (encoder->base.codec_type == SPICE_VIDEO_CODEC_TYPE_MJPEG) {
         /* See https://bugzilla.gnome.org/show_bug.cgi?id=753257 */
         spice_debug("removing the pipeline clock");
         gst_pipeline_use_clock(GST_PIPELINE(encoder->pipeline), NULL);
-        break;
-    case SPICE_VIDEO_CODEC_TYPE_VP8:
-        g_object_set(G_OBJECT(encoder->gstenc),
-                     "target-bitrate", (gint)encoder->video_bit_rate,
-                     NULL);
-        break;
-    case SPICE_VIDEO_CODEC_TYPE_H264:
-        g_object_set(G_OBJECT(encoder->gstenc),
-                     "bitrate", (guint)(encoder->bit_rate / 1024),
-                     NULL);
-        break;
-    default:
-        /* gstreamer_encoder_new() should have rejected this codec type */
-        spice_warning("unsupported codec type %d", encoder->base.codec_type);
-        free_pipeline(encoder);
-        return FALSE;
     }
 
     /* Set the source caps */
@@ -1211,6 +1247,17 @@ static int push_raw_frame(SpiceGstEncoder *encoder,
 static int pull_compressed_buffer(SpiceGstEncoder *encoder,
                                   VideoBuffer **outbuf)
 {
+#ifdef HAVE_GSTREAMER_0_10
+    SpiceGstVideoBuffer *buffer = create_gst_video_buffer();
+    buffer->gst_buffer = gst_app_sink_pull_buffer(encoder->appsink);
+    if (buffer->gst_buffer) {
+        buffer->base.data = GST_BUFFER_DATA(buffer->gst_buffer);
+        buffer->base.size = GST_BUFFER_SIZE(buffer->gst_buffer);
+        *outbuf = (VideoBuffer*)buffer;
+        return VIDEO_ENCODER_FRAME_ENCODE_DONE;
+    }
+    buffer->base.free((VideoBuffer*)buffer);
+#else
     GstSample *sample = gst_app_sink_pull_sample(encoder->appsink);
     if (sample) {
         SpiceGstVideoBuffer *buffer = create_gst_video_buffer();
@@ -1227,6 +1274,7 @@ static int pull_compressed_buffer(SpiceGstEncoder *encoder,
         buffer->base.free((VideoBuffer*)buffer);
         gst_sample_unref(sample);
     }
+#endif
     spice_debug("failed to pull the compressed buffer");
     return VIDEO_ENCODER_FRAME_UNSUPPORTED;
 }
