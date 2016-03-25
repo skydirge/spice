@@ -87,7 +87,6 @@ libserver_la_SOURCES =				\
 	main-channel.c				\
 	main-channel.h				\
 	mjpeg-encoder.c				\
-	mjpeg-encoder.h				\
 	red-channel.c				\
 	red-channel.h				\
 	red-common.h				\
@@ -123,6 +122,7 @@ libserver_la_SOURCES =				\
 	sound.h				\
 	stat.h					\
 	spicevmc.c				\
+	video-encoder.h				\
 	zlib-encoder.c				\
 	zlib-encoder.h				\
 	image-cache.h			\
