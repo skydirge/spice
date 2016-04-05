@@ -33,19 +33,28 @@
 
 #define SPICE_GST_DEFAULT_FPS 30
 
-#define DO_ZERO_COPY
+#ifndef HAVE_GSTREAMER_0_10
+# define DO_ZERO_COPY
+#endif
 
 
 typedef struct {
     SpiceBitmapFmt spice_format;
     const char *format;
     uint32_t bpp;
+    uint32_t depth;
+    uint32_t endianness;
+    uint32_t blue_mask;
+    uint32_t green_mask;
+    uint32_t red_mask;
 } SpiceFormatForGStreamer;
 
 typedef struct SpiceGstVideoBuffer {
     VideoBuffer base;
     GstBuffer *gst_buffer;
+#ifndef HAVE_GSTREAMER_0_10
     GstMapInfo map;
+#endif
 } SpiceGstVideoBuffer;
 
 typedef struct {
@@ -272,6 +281,9 @@ static void spice_gst_video_buffer_free(VideoBuffer *video_buffer)
 {
     SpiceGstVideoBuffer *buffer = (SpiceGstVideoBuffer*)video_buffer;
     if (buffer->gst_buffer) {
+#ifndef HAVE_GSTREAMER_0_10
+        gst_buffer_unmap(buffer->gst_buffer, &buffer->map);
+#endif
         gst_buffer_unref(buffer->gst_buffer);
     }
     free(buffer);
@@ -726,11 +738,11 @@ static const SpiceFormatForGStreamer *map_format(SpiceBitmapFmt format)
      * section-types-definitions.html documents.
      */
     static const SpiceFormatForGStreamer format_map[] =  {
-        {SPICE_BITMAP_FMT_RGBA, "BGRA", 32},
-        {SPICE_BITMAP_FMT_16BIT, "RGB15", 16},
+        {SPICE_BITMAP_FMT_RGBA, "BGRA", 32, 24, 4321, 0xff000000, 0xff0000, 0xff00},
+        {SPICE_BITMAP_FMT_16BIT, "RGB15", 16, 15, 4321, 0x001f, 0x03E0, 0x7C00},
         /* TODO: Test the other formats */
-        {SPICE_BITMAP_FMT_32BIT, "BGRx", 32},
-        {SPICE_BITMAP_FMT_24BIT, "BGR", 24},
+        {SPICE_BITMAP_FMT_32BIT, "BGRx", 32, 24, 4321, 0xff000000, 0xff0000, 0xff00},
+        {SPICE_BITMAP_FMT_24BIT, "BGR", 24, 24, 4321, 0xff0000, 0xff00, 0xff},
     };
 
     int i;
@@ -752,8 +764,18 @@ static void set_appsrc_caps(SpiceGstEncoder *encoder)
         gst_caps_unref(encoder->src_caps);
     }
     encoder->src_caps = gst_caps_new_simple(
+#ifdef HAVE_GSTREAMER_0_10
+        "video/x-raw-rgb",
+        "bpp", G_TYPE_INT, encoder->format->bpp,
+        "depth", G_TYPE_INT, encoder->format->depth,
+        "endianness", G_TYPE_INT, encoder->format->endianness,
+        "red_mask", G_TYPE_INT, encoder->format->red_mask,
+        "green_mask", G_TYPE_INT, encoder->format->green_mask,
+        "blue_mask", G_TYPE_INT, encoder->format->blue_mask,
+#else
         "video/x-raw",
         "format", G_TYPE_STRING, encoder->format->format,
+#endif
         "width", G_TYPE_INT, encoder->width,
         "height", G_TYPE_INT, encoder->height,
         "framerate", GST_TYPE_FRACTION, get_source_fps(encoder), 1,
@@ -785,7 +807,11 @@ static const gchar* get_gst_codec_name(SpiceGstEncoder *encoder)
     switch (encoder->base.codec_type)
     {
     case SPICE_VIDEO_CODEC_TYPE_MJPEG:
+#ifdef HAVE_GSTREAMER_0_10
+        return "ffenc_mjpeg";
+#else
         return "avenc_mjpeg";
+#endif
     case SPICE_VIDEO_CODEC_TYPE_VP8:
         return "vp8enc";
     case SPICE_VIDEO_CODEC_TYPE_H264:
@@ -799,6 +825,11 @@ static const gchar* get_gst_codec_name(SpiceGstEncoder *encoder)
 
 static gboolean create_pipeline(SpiceGstEncoder *encoder)
 {
+#ifdef HAVE_GSTREAMER_0_10
+    const gchar *converter = "ffmpegcolorspace";
+#else
+    const gchar *converter = "videoconvert";
+#endif
     const gchar* gstenc_name = get_gst_codec_name(encoder);
     if (!gstenc_name) {
         return FALSE;
@@ -807,30 +838,39 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
     switch (encoder->base.codec_type)
     {
     case SPICE_VIDEO_CODEC_TYPE_MJPEG:
+#ifdef HAVE_GSTREAMER_0_10
+        gstenc_opts = g_strdup("");
+#else
         /* Set max-threads to ensure zero-frame latency */
         gstenc_opts = g_strdup("max-threads=1");
+#endif
         break;
     case SPICE_VIDEO_CODEC_TYPE_VP8: {
         /* See http://www.webmproject.org/docs/encoder-parameters/
-         * - Set end-usage to get a constant bitrate to help with streaming.
+         * - Set mode/end-usage to get a constant bitrate to help with
+         *   streaming.
          * - resize-allowed allows trading resolution for low bitrates while
          *   min-quantizer ensures the bitrate does not get needlessly high.
          * - error-resilient minimises artifacts in case the client drops a
          *   frame.
          * - Set lag-in-frames, deadline and cpu-used to match
-         *   "Profile Realtime". lag-in-frames ensures zero-frame latency,
-         *   deadline turns on realtime behavior, and cpu-used targets a 75%
-         *   CPU usage.
+         *   "Profile Realtime". max-latency/lag-in-frames ensures zero-frame
+         *   latency, deadline turns on realtime behavior, cpu-used targets a
+         *   75% CPU usage while speed simply prioritizes encoding speed.
          * - deadline is supposed to be set in microseconds but in practice
          *   it behaves like a boolean.
          * - At least up to GStreamer 1.6.2, vp8enc cannot be trusted to pick
          *   the optimal number of threads. Also exceeding the number of
          *   physical core really degrades image quality.
-         * - token-partitions parallelizes more operations.
+         * - token-parts/token-partitions parallelizes more operations.
          */
         int threads = get_physical_core_count();
         int parts = threads < 2 ? 0 : threads < 4 ? 1 : threads < 8 ? 2 : 3;
+#ifdef HAVE_GSTREAMER_0_10
+        gstenc_opts = g_strdup_printf("mode=cbr min-quantizer=10 resize-allowed=true error-resilient=true max-latency=0 speed=7 threads=%d token-parts=%d", threads, parts);
+#else
         gstenc_opts = g_strdup_printf("end-usage=cbr min-quantizer=10 resize-allowed=true error-resilient=true lag-in-frames=0 deadline=1 cpu-used=4 threads=%d token-partitions=%d", threads, parts);
+#endif
         break;
         }
     case SPICE_VIDEO_CODEC_TYPE_H264:
@@ -849,7 +889,7 @@ static gboolean create_pipeline(SpiceGstEncoder *encoder)
     }
 
     GError *err = NULL;
-    gchar *desc = g_strdup_printf("appsrc is-live=true format=time do-timestamp=true name=src ! videoconvert ! %s %s name=encoder ! appsink name=sink", gstenc_name, gstenc_opts);
+    gchar *desc = g_strdup_printf("appsrc is-live=true format=time do-timestamp=true name=src ! %s ! %s %s name=encoder ! appsink name=sink", converter, gstenc_name, gstenc_opts);
     spice_debug("GStreamer pipeline: %s", desc);
     encoder->pipeline = gst_parse_launch_full(desc, NULL, GST_PARSE_FLAG_FATAL_ERRORS, &err);
     g_free(gstenc_opts);
@@ -896,6 +936,18 @@ static void set_gstenc_bitrate(SpiceGstEncoder *encoder)
             GParamSpecUInt *range = G_PARAM_SPEC_UINT(param);
             gst_bit_rate = MAX(range->minimum, MIN(range->maximum, gst_bit_rate));
             g_object_set(gobject, prop, (guint)gst_bit_rate, NULL);
+            break;
+        }
+        case G_TYPE_LONG: {
+            GParamSpecLong *range = G_PARAM_SPEC_LONG(param);
+            gst_bit_rate = MAX(range->minimum, MIN(range->maximum, gst_bit_rate));
+            g_object_set(gobject, prop, (glong)gst_bit_rate, NULL);
+            break;
+        }
+        case G_TYPE_ULONG: {
+            GParamSpecULong *range = G_PARAM_SPEC_ULONG(param);
+            gst_bit_rate = MAX(range->minimum, MIN(range->maximum, gst_bit_rate));
+            g_object_set(gobject, prop, (gulong)gst_bit_rate, NULL);
             break;
         }
         case G_TYPE_INT64: {
@@ -1148,21 +1200,44 @@ static inline int chunk_copy(SpiceGstEncoder *encoder, const SpiceBitmap *bitmap
     return TRUE;
 }
 
+#ifdef HAVE_GSTREAMER_0_10
+/* Dummy structure to avoid too many #ifdef in the main codepaths */
+typedef struct {
+    gpointer memory;
+} GstMapInfo;
+#endif
+
 /* A helper for push_raw_frame() */
 static uint8_t *allocate_and_map_memory(gsize size, GstMapInfo *map, GstBuffer *buffer)
 {
+#ifdef HAVE_GSTREAMER_0_10
+    buffer->malloc_data = g_malloc(size);
+    GST_BUFFER_DATA(buffer) = buffer->malloc_data;
+    GST_BUFFER_SIZE(buffer) = size;
+
+    return GST_BUFFER_DATA(buffer);
+#else
     GstMemory *mem = gst_allocator_alloc(NULL, size, NULL);
     if (!mem) {
         gst_buffer_unref(buffer);
         return NULL;
     }
-    if (!gst_memory_map(mem, map, GST_MAP_WRITE))
-    {
+    if (!gst_memory_map(mem, map, GST_MAP_WRITE)) {
         gst_memory_unref(mem);
         gst_buffer_unref(buffer);
         return NULL;
     }
     return map->data;
+#endif
+}
+
+static void unmap_and_release_memory(GstMapInfo *map, GstBuffer *buffer)
+{
+#ifndef HAVE_GSTREAMER_0_10
+    gst_memory_unmap(map->memory, map);
+    gst_memory_unref(map->memory);
+#endif
+    gst_buffer_unref(buffer);
 }
 
 /* A helper for spice_gst_encoder_encode_frame() */
@@ -1195,9 +1270,7 @@ static int push_raw_frame(SpiceGstEncoder *encoder,
 
         chunk_offset += src->left * encoder->format->bpp / 8;
         if (!line_copy(encoder, bitmap, chunk_offset, stream_stride, height, dst)) {
-            gst_memory_unmap(map.memory, &map);
-            gst_memory_unref(map.memory);
-            gst_buffer_unref(buffer);
+            unmap_and_release_memory(&map, buffer);
             return VIDEO_ENCODER_FRAME_UNSUPPORTED;
         }
     } else {
@@ -1215,23 +1288,27 @@ static int push_raw_frame(SpiceGstEncoder *encoder,
          */
 #endif
 
-        if (len) {
-            uint8_t *dst = allocate_and_map_memory(len, &map, buffer);
-            if (!dst) {
-                return VIDEO_ENCODER_FRAME_UNSUPPORTED;
-            }
-            if (!chunk_copy(encoder, bitmap, chunk_index, chunk_offset, len, dst)) {
-                gst_memory_unmap(map.memory, &map);
-                gst_memory_unref(map.memory);
-                gst_buffer_unref(buffer);
-                return VIDEO_ENCODER_FRAME_UNSUPPORTED;
-            }
+        uint8_t *dst = allocate_and_map_memory(len, &map, buffer);
+
+        if (len && !dst) {
+            return VIDEO_ENCODER_FRAME_UNSUPPORTED;
+        }
+
+        if (!chunk_copy(encoder, bitmap, chunk_index, chunk_offset, len, dst)) {
+            unmap_and_release_memory(&map, buffer);
+            return VIDEO_ENCODER_FRAME_UNSUPPORTED;
         }
     }
+#ifdef HAVE_GSTREAMER_0_10
+    gst_buffer_set_caps(buffer, encoder->src_caps);
+#endif
+
+#ifndef HAVE_GSTREAMER_0_10
     if (map.memory) {
         gst_memory_unmap(map.memory, &map);
         gst_buffer_append_memory(buffer, map.memory);
     }
+#endif
     GST_BUFFER_OFFSET(buffer) = encoder->frame++;
 
     GstFlowReturn ret = gst_app_src_push_buffer(encoder->appsrc, buffer);
