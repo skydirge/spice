@@ -42,12 +42,16 @@ struct RedsMigSpice {
 };
 typedef struct RedsMigSpice RedsMigSpice;
 
-typedef struct MainChannel {
+struct MainChannel {
     RedChannel base;
     uint8_t recv_buf[MAIN_CHANNEL_RECEIVE_BUF_SIZE];
     RedsMigSpice mig_target; // TODO: add refs and release (afrer all clients completed migration in one way or the other?)
     int num_clients_mig_wait;
-} MainChannel;
+};
+#ifndef MAINCHANNEL_TYPEDEF
+# define MAINCHANNEL_TYPEDEF
+typedef struct MainChannel MainChannel;
+#endif
 
 
 MainChannel *main_channel_new(RedsState *reds);

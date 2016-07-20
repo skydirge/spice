@@ -20,8 +20,14 @@
 #include "red-channel.h"
 
 /* FIXME: remove extra MainChannel typedef when possible */
+#ifndef MAINCHANNEL_TYPEDEF
+# define MAINCHANNEL_TYPEDEF
 typedef struct MainChannel MainChannel;
+#endif
+#ifndef MAINCHANNELCLIENT_TYPEDEF
+# define MAINCHANNELCLIENT_TYPEDEF
 typedef struct MainChannelClient MainChannelClient;
+#endif
 
 MainChannelClient *main_channel_client_create(MainChannel *main_chan, RedClient *client,
                                               RedsStream *stream, uint32_t connection_id,

@@ -110,7 +110,10 @@ typedef struct OutgoingHandlerInterface {
 typedef struct RedChannel RedChannel;
 typedef struct RedChannelClient RedChannelClient;
 typedef struct RedClient RedClient;
+#ifndef MAINCHANNELCLIENT_TYPEDEF
+# define MAINCHANNELCLIENT_TYPEDEF
 typedef struct MainChannelClient MainChannelClient;
+#endif
 
 /* Messages handled by red_channel
  * SET_ACK - sent to client on channel connection
