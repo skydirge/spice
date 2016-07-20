@@ -80,7 +80,7 @@ static inline void red_pipe_add_verb_proxy(RedChannelClient *rcc, gpointer data)
 
 static inline void red_pipes_add_verb(RedChannel *channel, uint16_t verb)
 {
-    red_channel_apply_clients_data(channel, red_pipe_add_verb_proxy, GUINT_TO_POINTER(verb));
+  red_channel_apply_clients_data(channel, red_pipe_add_verb_proxy, GUINT_TO_POINTER((uint32_t)verb));
 }
 
 RedWorker* red_worker_new(QXLInstance *qxl,
