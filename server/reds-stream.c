@@ -19,6 +19,9 @@
 #include <config.h>
 #endif
 
+/* This file implements / uses deprecated APIs */
+#define SPICE_DEPRECATED
+
 #include "main-dispatcher.h"
 #include "red-common.h"
 #include <common/log.h>

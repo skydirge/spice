@@ -28,10 +28,6 @@
 #include <spice/vd_agent.h>
 #include <spice/macros.h>
 
-#ifdef SPICE_SERVER_INTERNAL
-#undef SPICE_GNUC_DEPRECATED
-#define SPICE_GNUC_DEPRECATED
-#endif
 
 /* interface base type */
 

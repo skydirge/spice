@@ -19,6 +19,9 @@
 #include <config.h>
 #endif
 
+/* This file implements / uses deprecated APIs */
+#define SPICE_DEPRECATED
+
 #include <stdbool.h>
 #include <inttypes.h>
 #include <zlib.h>
